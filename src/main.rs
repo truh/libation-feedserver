@@ -1,15 +1,16 @@
 use actix_files as fs;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use chrono::{Duration, Utc};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use rss::extension::itunes::{ITunesChannelExtensionBuilder, NAMESPACE};
+use rss::{ChannelBuilder, EnclosureBuilder, Item, ItemBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
+use std::collections::BTreeMap;
 use std::fs::read_to_string;
 use std::fs::read_dir;
 use std::path::Path;
 use std::env;
-use r2d2_sqlite::SqliteConnectionManager;
-
-type Pool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
-type Connection = r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>;
 
 #[derive(Deserialize)]
 struct LibationSettings {
@@ -25,10 +26,49 @@ struct AppState {
     libation_folder: Box<Path>,
     books_folder: Box<Path>,
     base_url: Box<String>,
-    db_pool: Pool,
 }
 
-#[get("/book-feed/{book_id}.rss")]
+fn generate_feed(title: &str, book_id: &str, book_folder_name: &str, base_url: &str, image_path: &str, audio_paths: &Vec<String>) -> Option<String> {
+    let namespaces: BTreeMap<String, String> = [("itunes".to_string(), NAMESPACE.to_string())]
+        .iter()
+        .cloned()
+        .collect();
+    let itunes_extension = ITunesChannelExtensionBuilder::default()
+        .image(
+            format!("{}/libation-files/{}/{}", base_url, book_folder_name, image_path),
+        )
+        .block("Yes".to_string())
+        .build();
+    let mut items: Vec<Item> = Default::default();
+    let today = Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
+    for (i, file) in audio_paths.iter().enumerate() {
+        let pub_date = (today - Duration::days(i as i64)).to_rfc2822();
+        let enclosure = EnclosureBuilder::default()
+            .url(format!("{}/libation-files/{}/{}", base_url,book_folder_name, file))
+            .mime_type(String::from("audio/mpeg"))
+            .length(file.len().to_string())
+            .build();
+        let item = ItemBuilder::default()
+            .title(Some(file.replace('_', " ").to_owned()))
+            .enclosure(Some(enclosure))
+            .pub_date(pub_date)
+            .build();
+        items.push(item);
+    }
+    let channel = ChannelBuilder::default()
+        .namespaces(namespaces)
+        .title(title)
+        .itunes_ext(itunes_extension)
+        .items(items)
+        .build();
+    Some(channel.to_string())
+}
+
+#[get("/libation-feed/{book_id}.rss")]
 async fn book_feed(
     app_state: web::Data<AppState>,
     book_id: web::Path<String>,
@@ -79,8 +119,9 @@ async fn book_feed(
         println!("{:?}", meta_path);
         println!("{:?}", image_path);
         println!("{:?}", audio_paths);
+        return generate_feed("", &book_id, dir_entry.file_name().to_str().unwrap(), &app_state.base_url, image_path.unwrap().as_ref(), &audio_paths);
     }
-    format!("Book id: {}", book_id)
+    None
 }
 
 #[actix_web::main]
@@ -94,21 +135,16 @@ async fn main() -> std::io::Result<()> {
         .expect("Should have been able to read the file")
         .as_ref())?;
 
-    // connect to SQLite DB
-    let manager = SqliteConnectionManager::file(libation_folder.join("LibationContext.db"));
-    let pool = Pool::new(manager).unwrap();
-
     let app_state = web::Data::new(AppState {
         libation_folder: libation_folder.into(),
         books_folder: Path::new(&libation_settings.Books).into(),
         base_url: base_url.into(),
-        db_pool: pool,
     });
 
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
-            .service(fs::Files::new("/files",  &libation_settings.Books).show_files_listing())
+            .service(fs::Files::new("/libation-files",  &libation_settings.Books).show_files_listing())
             .service(book_feed)
     })
     .bind(("0.0.0.0", 8677))?
