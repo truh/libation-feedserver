@@ -7,10 +7,10 @@ use rss::{ChannelBuilder, EnclosureBuilder, Item, ItemBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 use std::collections::BTreeMap;
-use std::fs::read_to_string;
-use std::fs::read_dir;
-use std::path::Path;
 use std::env;
+use std::fs::read_dir;
+use std::fs::read_to_string;
+use std::path::Path;
 
 #[derive(Deserialize)]
 struct LibationSettings {
@@ -28,15 +28,23 @@ struct AppState {
     base_url: Box<String>,
 }
 
-fn generate_feed(title: &str, book_id: &str, book_folder_name: &str, base_url: &str, image_path: &str, audio_paths: &Vec<String>) -> Option<String> {
+fn generate_feed(
+    title: &str,
+    book_id: &str,
+    book_folder_name: &str,
+    base_url: &str,
+    image_path: &str,
+    audio_paths: &Vec<String>,
+) -> Option<String> {
     let namespaces: BTreeMap<String, String> = [("itunes".to_string(), NAMESPACE.to_string())]
         .iter()
         .cloned()
         .collect();
     let itunes_extension = ITunesChannelExtensionBuilder::default()
-        .image(
-            format!("{}/libation-files/{}/{}", base_url, book_folder_name, image_path),
-        )
+        .image(format!(
+            "{}/libation-files/{}/{}",
+            base_url, book_folder_name, image_path
+        ))
         .block("Yes".to_string())
         .build();
     let mut items: Vec<Item> = Default::default();
@@ -48,7 +56,10 @@ fn generate_feed(title: &str, book_id: &str, book_folder_name: &str, base_url: &
     for (i, file) in audio_paths.iter().enumerate() {
         let pub_date = (today - Duration::days(i as i64)).to_rfc2822();
         let enclosure = EnclosureBuilder::default()
-            .url(format!("{}/libation-files/{}/{}", base_url,book_folder_name, file))
+            .url(format!(
+                "{}/libation-files/{}/{}",
+                base_url, book_folder_name, file
+            ))
             .mime_type(String::from("audio/mpeg"))
             .length(file.len().to_string())
             .build();
@@ -69,10 +80,7 @@ fn generate_feed(title: &str, book_id: &str, book_folder_name: &str, base_url: &
 }
 
 #[get("/libation-feed/{book_id}.rss")]
-async fn book_feed(
-    app_state: web::Data<AppState>,
-    book_id: web::Path<String>,
-) -> impl Responder {
+async fn book_feed(app_state: web::Data<AppState>, book_id: web::Path<String>) -> impl Responder {
     let folder_tag = format!("[{}]", book_id);
     let mut paths = read_dir(app_state.books_folder.clone()).unwrap();
 
@@ -107,8 +115,7 @@ async fn book_feed(
                             meta_path = Some(String::from(file_name));
                         } else if file_name.ends_with(".jpg") {
                             image_path = Some(String::from(file_name));
-                        }
-                        else if file_name.ends_with(".mp3") {
+                        } else if file_name.ends_with(".mp3") {
                             audio_paths.push(String::from(file_name));
                         }
                     }
@@ -119,7 +126,14 @@ async fn book_feed(
         println!("{:?}", meta_path);
         println!("{:?}", image_path);
         println!("{:?}", audio_paths);
-        return generate_feed("", &book_id, dir_entry.file_name().to_str().unwrap(), &app_state.base_url, image_path.unwrap().as_ref(), &audio_paths);
+        return generate_feed(
+            "",
+            &book_id,
+            dir_entry.file_name().to_str().unwrap(),
+            &app_state.base_url,
+            image_path.unwrap().as_ref(),
+            &audio_paths,
+        );
     }
     None
 }
@@ -132,8 +146,9 @@ async fn main() -> std::io::Result<()> {
     let libation_folder = Path::new(&libation_folder);
     let libation_settings: LibationSettings = serde_json::from_str(
         read_to_string(libation_folder.join("Settings.json"))
-        .expect("Should have been able to read the file")
-        .as_ref())?;
+            .expect("Should have been able to read the file")
+            .as_ref(),
+    )?;
 
     let app_state = web::Data::new(AppState {
         libation_folder: libation_folder.into(),
@@ -144,7 +159,9 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
-            .service(fs::Files::new("/libation-files",  &libation_settings.Books).show_files_listing())
+            .service(
+                fs::Files::new("/libation-files", &libation_settings.Books).show_files_listing(),
+            )
             .service(book_feed)
     })
     .bind(("0.0.0.0", 8677))?
