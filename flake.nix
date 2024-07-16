@@ -166,5 +166,52 @@
           # pkgs.ripgrep
         ];
       };
-    });
+    })
+    // {
+      nixosModules.default = {
+        config,
+        lib,
+        pkgs,
+        ...
+      }:
+        with lib; let
+          cfg = config.services.libation-feedserver;
+        in {
+          options.services.libation-feedserver = {
+            enable = mkEnableOption "Enables libation-feedserver service";
+            user = mkOption {
+              type = types.str;
+            };
+            package = mkOption {
+              default = self.packages.${pkgs.system}.default;
+              type = types.package;
+            };
+            libation-folder = mkOption {
+              type = types.str;
+            };
+            base-url = mkOption {
+              type = types.str;
+            };
+            port = mkOption {
+              type = types.port;
+            };
+          };
+          config = mkIf cfg.enable {
+            systemd.services.libation-feedserver = {
+              enable = cfg.enable;
+              environment = {
+                LIBATION_FOLDER = cfg.libation-folder;
+                FEEDSERVER_BASE_URL = cfg.base-url;
+                FEEDSERVER_PORT = toString cfg.port;
+              };
+              path = [cfg.package];
+              script = "libation-feedserver";
+              serviceConfig = {
+                User = cfg.user;
+              };
+              wantedBy = ["multi-user.target"];
+            };
+          };
+        };
+    };
 }

@@ -141,7 +141,8 @@ async fn book_feed(app_state: web::Data<AppState>, book_id: web::Path<String>) -
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let libation_folder = env::var("LIBATION_FOLDER").unwrap();
-    let base_url = env::var("BASE_URL").unwrap();
+    let base_url = env::var("FEEDSERVER_BASE_URL").unwrap();
+    let port = env::var("FEEDSERVER_PORT").unwrap_or(String::from("8677")).parse::<u16>().unwrap();
     println!("Libation folder: {}", libation_folder);
     let libation_folder = Path::new(&libation_folder);
     let libation_settings: LibationSettings = serde_json::from_str(
@@ -164,7 +165,7 @@ async fn main() -> std::io::Result<()> {
             )
             .service(book_feed)
     })
-    .bind(("0.0.0.0", 8677))?
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }
