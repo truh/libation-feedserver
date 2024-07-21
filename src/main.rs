@@ -99,8 +99,8 @@ async fn book_feed(app_state: web::Data<AppState>, book_id: web::Path<String>) -
     let pool = app_state.db_pool.clone();
     let  row = pool.get().unwrap().query_row("SELECT Title, Description FROM Books WHERE AudibleProductId = (?)", &[&book_id.to_string()],
         |row| Ok(BookData {
-            description: row.get(0)?,
-            title: row.get(1)?,
+            title: row.get(0)?,
+            description: row.get(1)?,
         }));
 
     let found = paths.find(|path| {
