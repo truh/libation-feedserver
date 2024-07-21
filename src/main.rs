@@ -12,20 +12,32 @@ use std::fs::read_dir;
 use std::fs::read_to_string;
 use std::path::Path;
 
+use r2d2_sqlite::SqliteConnectionManager;
+
+type Pool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
+type Connection = r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>;
+
 #[derive(Deserialize)]
 struct LibationSettings {
     Books: String,
 }
 
 #[derive(Deserialize)]
-struct BookMeta {
+struct BooksMeta {
     Books: String,
+}
+
+#[derive(Debug)]
+struct BookData {
+    title: String,
+    description: String,
 }
 
 struct AppState {
     libation_folder: Box<Path>,
     books_folder: Box<Path>,
     base_url: Box<String>,
+    db_pool: Pool,
 }
 
 fn generate_feed(
@@ -84,6 +96,13 @@ async fn book_feed(app_state: web::Data<AppState>, book_id: web::Path<String>) -
     let folder_tag = format!("[{}]", book_id);
     let mut paths = read_dir(app_state.books_folder.clone()).unwrap();
 
+    let pool = app_state.db_pool.clone();
+    let  row = pool.get().unwrap().query_row("SELECT Title, Description FROM Books WHERE AudibleProductId = (?)", &[&book_id.to_string()],
+        |row| Ok(BookData {
+            description: row.get(0)?,
+            title: row.get(1)?,
+        }));
+
     let found = paths.find(|path| {
         if let Ok(ref dir_entry) = path {
             if let Ok(file_type) = dir_entry.file_type() {
@@ -126,8 +145,9 @@ async fn book_feed(app_state: web::Data<AppState>, book_id: web::Path<String>) -
         println!("{:?}", meta_path);
         println!("{:?}", image_path);
         println!("{:?}", audio_paths);
+        let title = if let Ok(row_data) = row { row_data.title } else { String::from("")};
         return generate_feed(
-            "",
+            &title,
             &book_id,
             dir_entry.file_name().to_str().unwrap(),
             &app_state.base_url,
@@ -151,10 +171,15 @@ async fn main() -> std::io::Result<()> {
             .as_ref(),
     )?;
 
+    // connect to SQLite DB
+    let manager = SqliteConnectionManager::file(libation_folder.join("LibationContext.db"));
+    let pool = Pool::new(manager).unwrap();
+
     let app_state = web::Data::new(AppState {
         libation_folder: libation_folder.into(),
         books_folder: Path::new(&libation_settings.Books).into(),
         base_url: base_url.into(),
+        db_pool: pool,
     });
 
     HttpServer::new(move || {
